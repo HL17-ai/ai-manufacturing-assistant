@@ -6,6 +6,12 @@ import os
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# 密码保护
+password = st.text_input("请输入访问密码：", type="password")
+if password != "manufacturing2024":
+    st.warning("请输入正确密码才能使用")
+    st.stop()
+
 st.title("🏭 制造业AI助手")
 st.write("输入你遇到的生产问题，AI将给出专业建议")
 
@@ -13,6 +19,7 @@ category = st.selectbox(
     "选择问题类型：",
     ["设备故障", "质量问题", "库存管理", "人员效率", "其他"]
 )
+
 problem = st.text_input("描述你的问题：")
 
 if st.button("分析问题"):
