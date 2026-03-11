@@ -15,29 +15,42 @@ if password != "manufacturing2024":
 
 st.title("🏭 制造业AI助手")
 
-# 两个功能选项
-mode = st.radio("选择功能：", ["💬 问题咨询", "📄 文件分析"])
+mode = st.radio("选择功能：", ["💬 对话咨询", "📄 文件分析"])
 
-if mode == "💬 问题咨询":
-    category = st.selectbox(
-        "选择问题类型：",
-        ["设备故障", "质量问题", "库存管理", "人员效率", "其他"]
-    )
-    problem = st.text_input("描述你的问题：")
-    if st.button("分析问题"):
-        if problem:
-            with st.spinner("AI正在分析..."):
+if mode == "💬 对话咨询":
+    # 初始化对话历史
+    if "messages" not in st.session_state:
+        st.session_state.messages = [
+            {"role": "system", "content": "你是一个精益生产专家，专门帮助工厂解决生产问题。"}
+        ]
+        st.session_state.chat_history = []
+
+    # 显示历史对话
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
+
+    # 输入框
+    user_input = st.chat_input("输入你的问题...")
+
+    if user_input:
+        with st.chat_message("user"):
+            st.write(user_input)
+
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        st.session_state.chat_history.append({"role": "user", "content": user_input})
+
+        with st.chat_message("assistant"):
+            with st.spinner("思考中..."):
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "你是一个精益生产专家，专门帮助工厂解决生产问题。回答要简洁实用。"},
-                        {"role": "user", "content": f"问题类型：{category}，具体描述：{problem}"}
-                    ]
+                    messages=st.session_state.messages
                 )
-                st.success("分析完成！")
-                st.write(response.choices[0].message.content)
-        else:
-            st.warning("请先输入问题！")
+                reply = response.choices[0].message.content
+                st.write(reply)
+
+        st.session_state.messages.append({"role": "assistant", "content": reply})
+        st.session_state.chat_history.append({"role": "assistant", "content": reply})
 
 elif mode == "📄 文件分析":
     uploaded_file = st.file_uploader("上传生产报告", type=["pdf", "txt"])
