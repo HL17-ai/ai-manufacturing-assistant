@@ -4,9 +4,18 @@ from dotenv import load_dotenv
 import os
 from PyPDF2 import PdfReader
 import openpyxl
+from sentence_transformers import SentenceTransformer
+import faiss
+import numpy as np
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+@st.cache_resource
+def load_model():
+    return SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+
+model = load_model()
 
 # 密码保护
 password = st.text_input("请输入访问密码：", type="password")
@@ -14,9 +23,9 @@ if password != "manufacturing2024":
     st.warning("请输入正确密码才能使用")
     st.stop()
 
-st.title("🏭 制造业AI助手")
+st.title("🏭 制造业AI助手 v2")
 
-mode = st.radio("选择功能：", ["💬 对话咨询", "📄 文件分析", "📊 数据分析"])
+mode = st.radio("选择功能：", ["💬 对话咨询", "📄 文件分析", "📊 数据分析", "🔍 知识库问答"])
 
 if mode == "💬 对话咨询":
     if "messages" not in st.session_state:
@@ -101,3 +110,54 @@ elif mode == "📊 数据分析":
                 )
                 st.subheader("AI分析结果：")
                 st.write(response.choices[0].message.content)
+
+elif mode == "🔍 知识库问答":
+    uploaded_file = st.file_uploader("上传设备手册或SOP文件", type=["pdf", "txt"])
+
+    if uploaded_file is not None:
+        if uploaded_file.type == "application/pdf":
+            reader = PdfReader(uploaded_file)
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text()
+        else:
+            text = uploaded_file.read().decode("utf-8")
+
+        chunk_size = 500
+        chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
+        st.success(f"文件读取成功！切分成 {len(chunks)} 个文字块")
+
+        with st.spinner("正在建立知识库..."):
+            embeddings = model.encode(chunks)
+            embeddings = np.array(embeddings).astype('float32')
+            index = faiss.IndexFlatL2(embeddings.shape[1])
+            index.add(embeddings)
+
+        st.success("知识库建立完成！现在可以提问了")
+
+        question = st.text_input("请输入你的问题：")
+
+        if st.button("搜索并回答"):
+            if question:
+                with st.spinner("正在搜索相关内容..."):
+                    question_embedding = model.encode([question]).astype('float32')
+                    k = min(3, len(chunks))
+                    distances, indices = index.search(question_embedding, k)
+                    relevant_chunks = [chunks[i] for i in indices[0]]
+                    context = "\n\n".join(relevant_chunks)
+
+                with st.spinner("AI正在回答..."):
+                    response = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": "你是一个制造业专家。请根据提供的文件内容回答问题，如果文件中没有相关信息请说明。"},
+                            {"role": "user", "content": f"文件相关内容：\n{context}\n\n问题：{question}"}
+                        ]
+                    )
+                    st.subheader("回答：")
+                    st.write(response.choices[0].message.content)
+
+                    st.subheader("参考的文件片段：")
+                    for i, chunk in enumerate(relevant_chunks):
+                        with st.expander(f"片段 {i+1}"):
+                            st.write(chunk)
