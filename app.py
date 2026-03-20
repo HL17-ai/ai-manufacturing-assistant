@@ -7,6 +7,7 @@ import openpyxl
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
+import sqlite3
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -16,6 +17,38 @@ def load_model():
     return SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 
 model = load_model()
+
+# 数据库函数
+def init_db():
+    conn = sqlite3.connect("chat_history.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            role TEXT,
+            content TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def save_message(role, content):
+    conn = sqlite3.connect("chat_history.db")
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO messages (role, content) VALUES (?, ?)", (role, content))
+    conn.commit()
+    conn.close()
+
+def load_messages():
+    conn = sqlite3.connect("chat_history.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT role, content FROM messages ORDER BY timestamp")
+    messages = cursor.fetchall()
+    conn.close()
+    return messages
+
+init_db()
 
 # 密码保护
 password = st.text_input("请输入访问密码：", type="password")
@@ -28,15 +61,15 @@ st.title("🏭 制造业AI助手 v2")
 mode = st.radio("选择功能：", ["💬 对话咨询", "📄 文件分析", "📊 数据分析", "🔍 知识库问答"])
 
 if mode == "💬 对话咨询":
-    if "messages" not in st.session_state:
-        st.session_state.messages = [
-            {"role": "system", "content": "你是一个精益生产专家，专门帮助工厂解决生产问题。"}
-        ]
-        st.session_state.chat_history = []
+    history = load_messages()
 
-    for msg in st.session_state.chat_history:
-        with st.chat_message(msg["role"]):
-            st.write(msg["content"])
+    ai_messages = [{"role": "system", "content": "你是一个精益生产专家，专门帮助工厂解决生产问题。"}]
+    for role, content in history:
+        ai_messages.append({"role": role, "content": content})
+
+    for role, content in history:
+        with st.chat_message(role):
+            st.write(content)
 
     user_input = st.chat_input("输入你的问题...")
 
@@ -44,20 +77,27 @@ if mode == "💬 对话咨询":
         with st.chat_message("user"):
             st.write(user_input)
 
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        st.session_state.chat_history.append({"role": "user", "content": user_input})
+        save_message("user", user_input)
+        ai_messages.append({"role": "user", "content": user_input})
 
         with st.chat_message("assistant"):
             with st.spinner("思考中..."):
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
-                    messages=st.session_state.messages
+                    messages=ai_messages
                 )
                 reply = response.choices[0].message.content
                 st.write(reply)
 
-        st.session_state.messages.append({"role": "assistant", "content": reply})
-        st.session_state.chat_history.append({"role": "assistant", "content": reply})
+        save_message("assistant", reply)
+
+    if st.button("清除所有历史记录"):
+        conn = sqlite3.connect("chat_history.db")
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM messages")
+        conn.commit()
+        conn.close()
+        st.rerun()
 
 elif mode == "📄 文件分析":
     uploaded_file = st.file_uploader("上传生产报告", type=["pdf", "txt"])
