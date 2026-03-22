@@ -48,6 +48,28 @@ def load_messages():
     conn.close()
     return messages
 
+def split_by_paragraph(text, min_length=50):
+    paragraphs = text.split("\n")
+    chunks = []
+    current_chunk = ""
+
+    for para in paragraphs:
+        stripped = para.strip()
+        
+    # 遇到空行，说明段落结束，强制切一刀
+        if not stripped:
+            if len(current_chunk.strip()) >= min_length:
+                chunks.append(current_chunk.strip())
+                current_chunk = ""
+        else:
+            current_chunk += stripped + "\n"
+
+    # 处理最后一块
+    if len(current_chunk.strip()) >= min_length:
+            chunks.append(current_chunk.strip())
+
+    return chunks
+
 init_db()
 
 # 密码保护
@@ -56,7 +78,7 @@ if password != "manufacturing2024":
     st.warning("请输入正确密码才能使用")
     st.stop()
 
-st.title("🏭 制造业AI助手 v2")
+st.title("🏭 制造业AI助手 v3")
 
 mode = st.radio("选择功能：", ["💬 对话咨询", "📄 文件分析", "📊 数据分析", "🔍 知识库问答"])
 
@@ -163,9 +185,14 @@ elif mode == "🔍 知识库问答":
         else:
             text = uploaded_file.read().decode("utf-8")
 
-        chunk_size = 500
-        chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
-        st.success(f"文件读取成功！切分成 {len(chunks)} 个文字块")
+        chunks = split_by_paragraph(text)
+        st.success(f"文件读取成功！智能切分成 {len(chunks)} 个段落块")
+
+        with st.expander("查看切块结果"):
+            for i, chunk in enumerate(chunks):
+                st.markdown(f"**块{i+1}：**")
+                st.write(chunk)
+                st.divider()
 
         with st.spinner("正在建立知识库..."):
             embeddings = model.encode(chunks)
