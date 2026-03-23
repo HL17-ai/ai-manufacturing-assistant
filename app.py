@@ -8,6 +8,7 @@ from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
 import sqlite3
+import json
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -80,7 +81,7 @@ if password != "manufacturing2024":
 
 st.title("🏭 制造业AI助手 v3")
 
-mode = st.radio("选择功能：", ["💬 对话咨询", "📄 文件分析", "📊 数据分析", "🔍 知识库问答"])
+mode = st.radio("选择功能：", ["💬 对话咨询", "📄 文件分析", "📊 数据分析", "🔍 知识库问答", "🤖 AI Agent"])
 
 if mode == "💬 对话咨询":
     history = load_messages()
@@ -228,3 +229,125 @@ elif mode == "🔍 知识库问答":
                     for i, chunk in enumerate(relevant_chunks):
                         with st.expander(f"片段 {i+1}"):
                             st.write(chunk)
+
+elif mode == "🤖 AI Agent":
+    st.write("告诉我你的目标，我会自动规划并执行")
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "analyze_production_issue",
+                "description": "分析制造业生产问题，给出根本原因和解决方案",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "issue": {
+                            "type": "string",
+                            "description": "生产问题的描述"
+                        },
+                        "severity": {
+                            "type": "string",
+                            "enum": ["低", "中", "高"],
+                            "description": "问题严重程度"
+                        }
+                    },
+                    "required": ["issue", "severity"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "generate_action_plan",
+                "description": "根据分析结果生成具体的行动计划",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "problem": {
+                            "type": "string",
+                            "description": "问题描述"
+                        },
+                        "deadline": {
+                            "type": "string",
+                            "description": "解决期限，比如'24小时内'或'本周内'"
+                        }
+                    },
+                    "required": ["problem", "deadline"]
+                }
+            }
+        }
+    ]
+
+    def analyze_production_issue(issue, severity):
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "你是一个制造业专家，专门分析生产问题的根本原因。"},
+                {"role": "user", "content": f"问题：{issue}\n严重程度：{severity}\n请分析根本原因。"}
+            ]
+        )
+        return response.choices[0].message.content
+
+    def generate_action_plan(problem, deadline):
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "你是一个制造业专家，专门制定解决问题的行动计划。"},
+                {"role": "user", "content": f"问题：{problem}\n期限：{deadline}\n请制定具体行动计划。"}
+            ]
+        )
+        return response.choices[0].message.content
+
+    def run_agent(user_goal):
+        messages = [
+            {"role": "system", "content": "你是一个制造业AI助手。根据用户的目标，自动选择合适的工具来完成任务。"},
+            {"role": "user", "content": user_goal}
+        ]
+
+        st.write("🤔 **Agent正在思考...**")
+
+        while True:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                tools=tools
+            )
+
+            message = response.choices[0].message
+
+            if message.tool_calls:
+                messages.append(message)
+
+                for tool_call in message.tool_calls:
+                    tool_name = tool_call.function.name
+                    tool_args = json.loads(tool_call.function.arguments)
+
+                    st.write(f"🔧 **使用工具：{tool_name}**")
+                    st.write(f"参数：{tool_args}")
+
+                    if tool_name == "analyze_production_issue":
+                        result = analyze_production_issue(**tool_args)
+                    elif tool_name == "generate_action_plan":
+                        result = generate_action_plan(**tool_args)
+
+                    st.write(f"✅ **工具结果：**")
+                    st.write(result)
+                    st.divider()
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": result
+                    })
+            else:
+                st.write("📋 **最终总结：**")
+                st.write(message.content)
+                break
+
+    user_goal = st.text_area("描述你想解决的问题或达成的目标：",
+                              placeholder="例如：我们的生产线今天出现了严重的良品率下降问题，请帮我分析原因并制定解决计划")
+
+    if st.button("启动Agent"):
+        if user_goal:
+            run_agent(user_goal)                            
